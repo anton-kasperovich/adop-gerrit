@@ -17,6 +17,7 @@ COPY resources/lib/mysql-connector-java-5.1.21.jar ${GERRIT_HOME}/site_ext/lib/m
 # Add utility scripts
 COPY resources/scripts/ ${GERRIT_HOME}/adop_scripts/
 RUN chmod -R +x ${GERRIT_HOME}/adop_scripts/
+RUN wget https://github.com/stedolan/jq/releases/download/jq-1.4/jq-linux-x86_64 -O /usr/local/bin/jq && chmod -R +x /usr/local/bin && chmod -R +x ${GERRIT_HOME}/adop_scripts/
 
 # Add site content
 COPY resources/site/ ${GERRIT_HOME}/site_ext/
