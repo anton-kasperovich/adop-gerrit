@@ -4,26 +4,26 @@ set -e
 # Usage
 usage() {
     echo "Usage:"
-    echo "    ${0} -c <host> -p <port> -A <username> -P <password> -k <KEY> -u <USER>"
+    echo "    ${0} -c <CONSUL_HOST> -p <CONSUL_PORT> -A <ADMIN_USER> -P <ADMIN_PASSWORD> -k <KEY> -u <USER>"
     exit 1
 }
 
 # Constants
-SLEEP_TIME=10
+SLEEP_TIME=5
 
 while getopts "c:p:A:P:k:u:" opt; do
   case $opt in
     c)
-      host=${OPTARG}
+      consul_host=${OPTARG}
       ;;
     p)
-      port=${OPTARG}
+      consul_port=${OPTARG}
       ;;
     A)
-      username=${OPTARG}
+      admin_user=${OPTARG}
       ;;
     P)
-      password=${OPTARG}
+      admin_password=${OPTARG}
       ;;
     k)
       key=${OPTARG}
@@ -38,22 +38,21 @@ while getopts "c:p:A:P:k:u:" opt; do
   esac
 done
 
-if [ -z "${host}" ] || [ -z "${port}" ] || [ -z "${username}" ] || [ -z "${password}" ] || [ -z "${key}" ] || [ -z "${user}" ]; then
+if [ -z "${consul_host}" ] || [ -z "${consul_port}" ] || [ -z "${admin_user}" ] || [ -z "${admin_password}" ] || [ -z "${key}" ] || [ -z "${user}" ]; then
     echo "Parameters missing"
     usage
 fi
 
-echo "Testing Jenkins Connection & Key Presence"
-until curl -sL --output /dev/null --silent --write-out "%{http_code}\\n" \
-    -u ${username}:${password} \
-    "http://${host}:${port}/jenkins/userContent/${key}" -o /dev/null | grep "200" &> /dev/null
+echo "Testing Consul Connection & Key Presence"
+until curl -sL -w "%{http_code}\\n" "http://${consul_host}:${consul_port}/v1/kv/${key}" -o /dev/null | grep "200" &> /dev/null
 do
-    echo "Jenkins or key unavailable, sleeping for ${SLEEP_TIME}"
+    echo "Consul or key unavailable, sleeping for ${SLEEP_TIME}"
     sleep "${SLEEP_TIME}"
 done
 
 echo "Retrieving value: ${key}"
-ssh_key=$(curl -s -X GET -u ${username}:${password} "http://${host}:${port}/jenkins/userContent/${key}")
+consul_response=$(curl -s -X GET "http://${consul_host}:${consul_port}/v1/kv/${key}")
+value=$(echo "${consul_response}" | jq -r '.[]|.Value' | base64 --decode)
 
 echo "Checking if \"${user}\" exists"
 if curl -sL -w "%{http_code}\\n" "http://localhost:8080/gerrit/accounts/${user}" -o /dev/null | grep "404" &> /dev/null; then
@@ -61,12 +60,5 @@ if curl -sL -w "%{http_code}\\n" "http://localhost:8080/gerrit/accounts/${user}"
     exit 1
 fi
 
-echo "*** Verify key already exists... Gerrit does not do this ..."
-# Download the stored key and decode from to UTF-8 using echo -e the -n switch from echo allows to remove the trailing \n that echo would add.
-# The decode part is necessary as Gerrit correctly encode the SSH key and as a result = sign is converted to \u003d
-stored_key=$(echo -e $(curl -u jenkins:jenkins --silent http://localhost:8080/gerrit/a/accounts/self/sshkeys | grep "ssh_public_key" | awk '{split($0, a, ": "); print a[2]}' | sed 's/[",]//g'))
-echo "****** Found stored key, verify if is same are downloaded ..."
-[[ "$stored_key" == "$ssh_key" ]] && exit 0 || echo "****** Stored key is not same as downloaded, uploading it ..."
-
 echo "Uploading key to Gerrit user \"${user}\""
-curl -X POST -u "${username}:${password}" -d "${ssh_key}" "http://localhost:8080/gerrit/a/accounts/${user}/sshkeys"
+curl -X POST -u "${admin_user}:${admin_password}" -d "${value}" "http://localhost:8080/gerrit/a/accounts/${user}/sshkeys"
